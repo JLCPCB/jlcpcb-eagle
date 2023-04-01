@@ -16,17 +16,29 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 // * cmd-change-swap-layer.ulp
 // * centroid-screamingcircuits-smd.ulp
 
+#usage "<b>JLCPCB Assembly files generator (BOM/CPL) </b>\n"
+"<p>"
+    "Generates BOM and CPL files for JLCPCB SMT assembly service "
+    "https://jlcpcb.com/smt-assembly"
+    "<p>"
+    "Run the ULP from the board editor"
+    "<p>"
+    "By adding following eagle Attributes, the cpl files can be influenced:"
+    "<p>"
+    "JlC_R: Roation Shift"
+    "<p>"
+    "JlC_X: Shift part in (positive) X direction (relative to rotation of 0°)"
+    "<p>"
+    "JlC_Y: Shift part in (positive) Y direction (relative to rotation of 0°)"
+    "<p>"
+    "LCSC: Assign LCSC part number for part selection"
+    "<author>Author: OXullo Intersecans x@brainrapers.org</author>"
 
-#usage "<b>JLCPCB BOM/CPL files generator</b>\n"
-       "<p>"
-       "Generates BOM and CPL files for JLCPCB SMT assembly service"
-       "https://jlcpcb.com/smt-assembly"
-       "<p>"
-       "Run the ULP from the board editor"
-       "<p>"
-       "<author>Author: OXullo Intersecans x@brainrapers.org</author>"
+// layer mapping
+int layer_id_map[] = {1, 16};
+string layer_name_map[] = {"Top", "Bottom"};
 
-
+UL_ELEMENT selected_elements[]; // stores the assembly parts
 int selected_elements_layer[];  // stores the layer of each part
 
 string getAttribute(UL_ELEMENT E, string attrName, string altAttrName)
@@ -49,9 +61,10 @@ string getLCSC(UL_ELEMENT E)
 
 string replace_commas(string s)
 {
-    while (strstr(s, ",") >= 0) {  // convert commas to spaces
+    while (strstr(s, ",") >= 0)
+    { // convert commas to spaces
         string substitution_string = " ";
-        sprintf(s, "%s%s%s", strsub(s, 0, strstr(s, ",")), substitution_string, strsub(s, strstr(s, ",")+1));
+        sprintf(s, "%s%s%s", strsub(s, 0, strstr(s, ",")), substitution_string, strsub(s, strstr(s, ",") + 1));
     }
 
     return s;
@@ -201,9 +214,10 @@ if (board) {
         // generate bom file
         output(bom_filename)
         {
-            // With big boards, JLC assembly service runs into issuses with to many designators in one line. The designators are therefore splitten up.
+            // With big boards, JLC assembly service runs into issues with to many designators in one line. The designators are therefore splitten up.
             int JLC_MAX_DESIGNATOR_COUNT = 200;
 
+            // use a flag-array to store for every part if it has already been collected 
             int usedFlag[];
             for (int i = 0; i < element_count; ++i)
             {
@@ -266,9 +280,11 @@ if (board) {
             }
         }
 
-  dlgMessageBox("BOM and CPL files have been exported to: " + output_dir, "OK");
-
-} else {
-  dlgMessageBox("Run this ULP from a Board", "OK");
-  exit (0);
+        dlgMessageBox("BOM and CPL files have been exported to: " + output_dir, "OK");
+    }
+}
+else
+{
+    dlgMessageBox("Run this ULP from a Board", "OK");
+    exit(0);
 }
