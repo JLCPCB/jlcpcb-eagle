@@ -27,9 +27,25 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
        "<author>Author: OXullo Intersecans x@brainrapers.org</author>"
 
 
-int layer_id_map[] = { 1, 16 };
-UL_ELEMENT selected_elements[];
-string layer_name_map[] = { "Top", "Bottom" };
+int selected_elements_layer[];  // stores the layer of each part
+
+string getAttribute(UL_ELEMENT E, string attrName, string altAttrName)
+{
+    E.attributes(A)
+    { // manually rotate the part
+        if (A.name == attrName || A.name == altAttrName)
+        {
+            return A.value;
+        }
+    }
+    return "";
+}
+
+string getLCSC(UL_ELEMENT E)
+{
+    // get LCSC_PART value of a part
+    return getAttribute(E, "LCSC", "LCSC_PART");
+}
 
 string replace_commas(string s)
 {
@@ -103,35 +119,79 @@ if (board) {
         string cpl_filename = base_path + "_cpl.csv";
         string bom_filename = base_path + "_bom.csv";
 
-    output(cpl_filename) {
-        printf("Designator,Mid X,Mid Y,Layer,Rotation\n");
+        // generate cpl file
+        output(cpl_filename)
+        {
+            // print header
+            printf("Designator,Mid X,Mid Y,Layer,Rotation\n");
 
-        for (int i = 0 ; i < element_count ; ++i) {
-            UL_ELEMENT E = selected_elements[i];
-            int angle = E.angle;
+            // go througth all parts
+            for (int i = 0; i < element_count; ++i)
+            {
+                UL_ELEMENT E = selected_elements[i];
 
-            E.attributes(A) {  // manually rotate the part
-                if (A.name == "JLC_ROTATION" || A.name == "JLC_ROT") {
-                    angle = angle + strtol(A.value);
-
-                    while(angle>360){
-                        angle = angle - 360;
-                    }
+                if (skip_empty && E.value == "")
+                {
+                    continue;
                 }
-            }
 
-            if (layer_name_map[layer_choice] == "Bottom") {
-              angle = (360 - angle);
-              angle = angle + 180;
-              angle = angle % 360;
+
+                // Placement data
+                int layer = selected_elements_layer[i];
+                int angle = E.angle;
+
+                real Dx = 0.0;
+                real Dy = 0.0;
+                
+
+                // Rotation for bottom parts
+                if (layer == 16)
+                {
+                    angle = (360 - angle);
+                    angle = angle + 180;
+                }
+
+                // manual rotation
+                string ext_rot = getAttribute(E, "JLC_R", "JLCR");
+                if(ext_rot != "")
+                {   
+                        angle = angle + strtol(ext_rot);
+                }   
+
+                angle = angle % 360;
+
+
+                // manual position shift
+                string ext_x = getAttribute(E, "JLC_X", "JLCX");
+                if(ext_x != "")
+                {   
+                        real dist = strtod(ext_x);
+                        Dx += dist * cos(angle / 180.0 * PI);
+                        Dy += dist * sin(angle / 180.0 * PI);
+                }   
+
+                string ext_y = getAttribute(E, "JLC_Y","JLCY");
+                if(ext_y != "")
+                {   
+                        real dist = strtod(ext_y);
+                        Dy += dist * cos(angle / 180.0 * PI);
+                        Dx -= dist * sin(angle / 180.0 * PI);
+                }   
+
+
+                // Print lien to file
+                real ang = angle;
+                string layer_name = (layer == 1 ? "TOP" : "BOTTOM");
+
+                real x = u2mm(E.x) + Dx;
+                real y = u2mm(E.y) + Dy;
+
+                printf("%s,%5.2f,%5.2f,%s,%.1f\n",
+                       E.name, x, y,
+                       layer_name,
+                       ang);
             }
-            real ang = angle;
-            printf("%s,%5.2f,%5.2f,%s,%.1f\n",
-                E.name, u2mm(E.x), u2mm(E.y),
-                layer_name_map[layer_choice],
-                ang);
         }
-    }
 
         // generate bom file
         output(bom_filename)
