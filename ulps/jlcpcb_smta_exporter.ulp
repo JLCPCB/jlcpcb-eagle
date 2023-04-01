@@ -102,14 +102,19 @@ if (board) {
 
         int element_count = 0;
 
-    B.elements(E) if (E.populate) {
-        E.package.contacts(C) {
-            if (C.smd && C.smd.layer == layer_id_map[layer_choice]) {
-                selected_elements[element_count++] = E;
-                break;
+        // collect all the parts
+        B.elements(E) if (E.populate)
+        {
+            E.package.contacts(C)
+            {
+                if (C.smd && ((C.smd.layer == 1 && doTop) || (C.smd.layer == 16 && doBottom)))
+                {
+                    selected_elements_layer[element_count] = C.smd.layer;
+                    selected_elements[element_count++] = E;
+                    break;
+                }
             }
         }
-    }
 
         // Select the output directory
         string base_path = (output_dir + "/" +
