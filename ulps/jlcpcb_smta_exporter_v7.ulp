@@ -10,6 +10,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
 */
 
+// Modified 2023 by Felix Haschke
+
 // Note: the following eagle-bundled ULPs have been used as a guidance:
 // * mountsmd.ulp
 // * bom.ulp
@@ -29,175 +31,275 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 // attribute name can be LCSC_PART or just LCSC, merged from upstream
 // LCSC_ROT or LCSC_ROTATION for manually rotation has been added, merged from upstream
 
-#usage "<b>JLCPCB BOM/CPL files generator</b>\n"
-       "<p>"
-       "Generates BOM and CPL files for JLCPCB SMT assembly service"
-       "https://jlcpcb.com/smt-assembly"
-       "<p>"
-       "Run the ULP from the board editor"
-       "<p>"
-       "<author>Author: OXullo Intersecans x@brainrapers.org</author>"
+#usage "<b>JLCPCB Assembly files generator (BOM/CPL) </b>\n"
+"<p>"
+    "Generates BOM and CPL files for JLCPCB SMT assembly service "
+    "https://jlcpcb.com/smt-assembly"
+    "<p>"
+    "Run the ULP from the board editor"
+    "<p>"
+    "By adding following eagle Attributes, the cpl files can be influenced:"
+    "<p>"
+    "JlC_R: Roation Shift"
+    "<p>"
+    "JlC_X: Shift part in (positive) X direction (relative to rotation of 0°)"
+    "<p>"
+    "JlC_Y: Shift part in (positive) Y direction (relative to rotation of 0°)"
+    "<p>"
+    "LCSC: Assign LCSC part number for part selection"
+    "<author>Author: OXullo Intersecans x@brainrapers.org</author>"
 
+// layer mapping
+int layer_id_map[] = {1, 16};
+string layer_name_map[] = {"Top", "Bottom"};
 
-int layer_id_map[] = { 1, 16 };
-UL_ELEMENT selected_elements[];
-string layer_name_map[] = { "Top", "Bottom" };
+UL_ELEMENT selected_elements[]; // stores the assembly parts
+int selected_elements_layer[];  // stores the layer of each part
+
+string getAttribute(UL_ELEMENT E, string attrName, string altAttrName)
+{
+    E.attributes(A)
+    { // manually rotate the part
+        if (A.name == attrName || A.name == altAttrName)
+        {
+            return A.value;
+        }
+    }
+    return "";
+}
+
+string getLCSC(UL_ELEMENT E)
+{
+    // get LCSC_PART value of a part
+    return getAttribute(E, "LCSC", "LCSC_PART");
+}
 
 string replace_commas(string s)
 {
-    while (strstr(s, ",") >= 0) {  // convert commas to spaces
+    while (strstr(s, ",") >= 0)
+    { // convert commas to spaces
         string substitution_string = " ";
-        sprintf(s, "%s%s%s", strsub(s, 0, strstr(s, ",")), substitution_string, strsub(s, strstr(s, ",")+1));
+        sprintf(s, "%s%s%s", strsub(s, 0, strstr(s, ",")), substitution_string, strsub(s, strstr(s, ",") + 1));
     }
 
     return s;
 }
 
-if (board) board(B) {
+if (board) {
+    board(B)
+    {
+        int skip_empty = 1;
 
-    string txt;
-    int layer_choice = 0;
-    int skip_empty=1;
+        int doTop = 1;
+        int doBottom = 0;
 
-    int result = dlgDialog("Export settings") {
-        dlgGroup("Export layer") {
-            dlgRadioButton("&Top", layer_choice);
-            dlgRadioButton("&Bottom", layer_choice);
+        // User Dialog
+        int result = dlgDialog("Export settings")
+        {
+            dlgGroup("Export layer")
+            {
+                dlgCheckBox("&Top", doTop);
+                dlgCheckBox("&Bottom", doBottom);
+            }
+            dlgCheckBox("&Skip parts with missing value", skip_empty);
+            dlgHBoxLayout
+            {
+                dlgStretch(1);
+                dlgPushButton("+OK") dlgAccept();
+                dlgPushButton("-Cancel") dlgReject(-1);
+            }
+        };
+
+        if (result < 0)
+        {
+            exit(0);
         }
-        dlgCheckBox("&Skip parts with missing value",skip_empty);
-        dlgHBoxLayout {
-            dlgStretch(1);
-            dlgPushButton("+OK") dlgAccept();
-            dlgPushButton("-Cancel") dlgReject(-1);
+
+        if (doTop == 0 && doBottom == 0)
+        {
+            dlgMessageBox("No layer choosen. Please try start again.", "Ok");
+            exit(0);
         }
-    };
-    if (result < 0) {
-        exit(0);
-    }
 
-    string output_dir = dlgDirectory("Export files to", filedir(B.name));
+        string output_dir = dlgDirectory("Export files to", filedir(B.name));
 
-    if (output_dir == "") {
-        exit(0);
-    }
+        if (output_dir == "")
+        {
+            exit(0);
+        }
 
-    int element_count = 0;
+        int element_count = 0;
 
-    B.elements(E) if (E.populate) {
-        E.package.contacts(C) {
-            if (C.smd && C.smd.layer == layer_id_map[layer_choice]) {
-                selected_elements[element_count++] = E;
-                break;
+        // collect all the parts
+        B.elements(E) if (E.populate)
+        {
+            E.package.contacts(C)
+            {
+                if (C.smd && ((C.smd.layer == 1 && doTop) || (C.smd.layer == 16 && doBottom)))
+                {
+                    selected_elements_layer[element_count] = C.smd.layer;
+                    selected_elements[element_count++] = E;
+                    break;
+                }
             }
         }
-    }
 
-    string base_path = (output_dir + "/" +
-        strsub(filename(B.name), 0, strlen(filename(B.name)) - 4) +
-        "_" + strlwr(layer_name_map[layer_choice]));
+        // Select the output directory
+        string base_path = (output_dir + "/" +
+                            strsub(filename(B.name), 0, strlen(filename(B.name)) - 4) +
+                            "_ASSEMBLY");
 
-    string cpl_filename = base_path + "_cpl.csv";
-    string bom_filename = base_path + "_bom.csv";
+        string cpl_filename = base_path + "_cpl.csv";
+        string bom_filename = base_path + "_bom.csv";
 
-    output(cpl_filename) {
-        printf("Designator,Mid X,Mid Y,Layer,Rotation\n");
+        // generate cpl file
+        output(cpl_filename)
+        {
+            // print header
+            printf("Designator,Mid X,Mid Y,Layer,Rotation\n");
 
-        for (int i = 0 ; i < element_count ; ++i) {
-            UL_ELEMENT E = selected_elements[i];
-            if(skip_empty && E.value=="") {
-                continue;
+            // go througth all parts
+            for (int i = 0; i < element_count; ++i)
+            {
+                UL_ELEMENT E = selected_elements[i];
+
+                if (skip_empty && E.value == "")
+                {
+                    continue;
+                }
+
+
+                // Placement data
+                int layer = selected_elements_layer[i];
+                int angle = E.angle;
+
+                real Dx = 0.0;
+                real Dy = 0.0;
+                
+
+                // Rotation for bottom parts
+                if (layer == 16)
+                {
+                    angle = (360 - angle);
+                    angle = angle + 180;
+                }
+
+                // manual rotation
+                string ext_rot = getAttribute(E, "JLC_R", "JLCR");
+                if(ext_rot != "")
+                {   
+                        angle = angle + strtol(ext_rot);
+                }   
+
+                angle = angle % 360;
+
+
+                // manual position shift
+                string ext_x = getAttribute(E, "JLC_X", "JLCX");
+                if(ext_x != "")
+                {   
+                        real dist = strtod(ext_x);
+                        Dx += dist * cos(angle / 180.0 * PI);
+                        Dy += dist * sin(angle / 180.0 * PI);
+                }   
+
+                string ext_y = getAttribute(E, "JLC_Y","JLCY");
+                if(ext_y != "")
+                {   
+                        real dist = strtod(ext_y);
+                        Dy += dist * cos(angle / 180.0 * PI);
+                        Dx -= dist * sin(angle / 180.0 * PI);
+                }   
+
+
+                // Print lien to file
+                real ang = angle;
+                string layer_name = (layer == 1 ? "TOP" : "BOTTOM");
+
+                real x = u2mm(E.x) + Dx;
+                real y = u2mm(E.y) + Dy;
+
+                printf("%s,%5.2f,%5.2f,%s,%.1f\n",
+                       E.name, x, y,
+                       layer_name,
+                       ang);
             }
-            int angle = E.angle;
+        }
 
-            E.attributes(A) {  // manually rotate the part
-                if (A.name == "JLC_ROTATION" || A.name == "JLC_ROT") {
-                    angle = angle + strtol(A.value);
+        // generate bom file
+        output(bom_filename)
+        {
+            // With big boards, JLC assembly service runs into issues with to many designators in one line. The designators are therefore splitten up.
+            int JLC_MAX_DESIGNATOR_COUNT = 200;
 
-                    while(angle>360){
-                        angle = angle - 360;
+            // use a flag-array to store for every part if it has already been collected 
+            int usedFlag[];
+            for (int i = 0; i < element_count; ++i)
+            {
+                usedFlag[i] = 0;
+            }
+
+            // Print file header
+            printf("Comment,Designator,Footprint,LCSC Part #\n");
+
+            for (int usedIndex = 0; usedIndex < element_count; ++usedIndex)
+            {
+                // check if already collected
+                if (usedFlag[usedIndex] == 1)
+                    continue;
+
+                UL_ELEMENT currentPackage = selected_elements[usedIndex];
+
+                // Store Designators matching this package
+                string designators = currentPackage.name;
+
+                int designator_count = 1;
+
+                string package_value = replace_commas(currentPackage.value);
+                string package_footprint = replace_commas(currentPackage.package.name);
+                string package_lcscpart = getLCSC(currentPackage);
+
+                // collect all elements that match this package
+                for (int index = usedIndex + 1; index < element_count; index++)
+                {
+                    // check if already collected
+                    if (usedFlag[index] == 1)
+                        continue;
+
+                    UL_ELEMENT currentPart = selected_elements[index];
+
+                    string part_value = replace_commas(currentPart.value);
+                    string part_footprint = replace_commas(currentPart.footprint.name);
+                    string part_lcscpart = getLCSC(currentPart);
+
+                    // Check if identical
+                    if (part_value == package_value && part_footprint == package_footprint && package_lcscpart == part_lcscpart)
+                    {
+                        designators += " " + currentPart.name;
+                        designator_count++;
+
+                        // mark element collected
+                        usedFlag[index] = 1;
                     }
-                }
-            }
 
-            if (layer_name_map[layer_choice] == "Bottom") {
-              angle = (360 - angle);
-              angle = angle + 180;
-              angle = angle % 360;
+                    // Check if max designator count for this line is exceeded
+                    if (designator_count >= JLC_MAX_DESIGNATOR_COUNT)
+                        break;
+                }
+
+                // append element to the file
+                printf("%s,%s,%s,%s\n", package_value, designators, package_footprint, package_lcscpart);
+
+                // mark element collected
+                usedFlag[i] = 1;
             }
-            real ang = angle;
-            printf("%s,%5.2f,%5.2f,%s,%.1f\n",
-                E.name, u2mm(E.x), u2mm(E.y),
-                layer_name_map[layer_choice],
-                ang);
         }
+
+        dlgMessageBox("BOM and CPL files have been exported to: " + output_dir, "OK");
     }
-
-    output(bom_filename) {
-        int i;
-        int indexes[];
-        numeric string values[];
-
-        for (i=0 ; i < element_count ; ++i) {
-            indexes[i] = i;
-            values[i] = selected_elements[i].value;
-        }
-        sort(element_count, indexes, values);
-        printf("Comment,Designator,Footprint,LCSC Part #\n");
-
-        string current_value = "";
-        string current_footprint = "";
-        string current_lcscpart = "";
-        string designators = "";
-        int notstarting=0;
-        string E_LCSC_value = "";
-
-        for (i = 0 ; i < element_count ; ++i) {
-            UL_ELEMENT E = selected_elements[indexes[i]];
-
-            if(skip_empty && E.value=="") {
-                continue;
-            }
-
-            // get LCSC_PART value of a part
-            E.attributes(A) {
-                if (A.name == "LCSC_PART" || A.name == "LCSC") {
-                    //printf("%s", A.value);
-                    E_LCSC_value = replace_commas(A.value);
-                }
-                else {
-                    E_LCSC_value = "";
-                }
-            }
-
-            if (notstarting && (E.value != current_value || E.package.name != current_footprint || E_LCSC_value != current_lcscpart)) {
-                printf("%s,%s,%s,%s\n", current_value, designators, current_footprint, current_lcscpart);
-                designators = "";
-            }
-            notstarting=1;
-
-            if (designators != "") {
-                designators += " ";
-            }
-            designators += E.name;
-            current_value = replace_commas(E.value);
-            current_footprint = replace_commas(E.package.name);
-            current_lcscpart = "";
-
-            // get LCSC_PART value of a part
-            E.attributes(A) {
-                if (A.name == "LCSC_PART" || A.name == "LCSC") {
-                    current_lcscpart = replace_commas(A.value);
-                }
-            }
-        }
-        if (current_value != "") {
-          printf("%s,%s,%s,%s\n", current_value, designators, current_footprint, current_lcscpart);
-        }
-    }
-
-  dlgMessageBox("BOM and CPL files have been exported to: " + output_dir, "OK");
-
-} else {
-  dlgMessageBox("Run this ULP from a Board", "OK");
-  exit (0);
+}
+else
+{
+    dlgMessageBox("Run this ULP from a Board", "OK");
+    exit(0);
 }
