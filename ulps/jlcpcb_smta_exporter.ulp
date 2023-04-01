@@ -41,26 +41,50 @@ string replace_commas(string s)
     return s;
 }
 
-if (board) board(B) {
+if (board) {
+    board(B)
+    {
+        int skip_empty = 1;
 
-    string txt;
-    int layer_choice = 0;
+        int doTop = 1;
+        int doBottom = 0;
 
-    dlgDialog("Layer selection") {
-        dlgGroup("Export layer") {
-            dlgRadioButton("&Top", layer_choice);
-            dlgRadioButton("&Bottom", layer_choice);
+        // User Dialog
+        int result = dlgDialog("Export settings")
+        {
+            dlgGroup("Export layer")
+            {
+                dlgCheckBox("&Top", doTop);
+                dlgCheckBox("&Bottom", doBottom);
+            }
+            dlgCheckBox("&Skip parts with missing value", skip_empty);
+            dlgHBoxLayout
+            {
+                dlgStretch(1);
+                dlgPushButton("+OK") dlgAccept();
+                dlgPushButton("-Cancel") dlgReject(-1);
+            }
+        };
+
+        if (result < 0)
+        {
+            exit(0);
         }
-        dlgPushButton("OK") dlgAccept();
-    };
 
-    string output_dir = dlgDirectory("Export files to", filedir(B.name));
+        if (doTop == 0 && doBottom == 0)
+        {
+            dlgMessageBox("No layer choosen. Please try start again.", "Ok");
+            exit(0);
+        }
 
-    if (output_dir == "") {
-        exit(0);
-    }
+        string output_dir = dlgDirectory("Export files to", filedir(B.name));
 
-    int element_count = 0;
+        if (output_dir == "")
+        {
+            exit(0);
+        }
+
+        int element_count = 0;
 
     B.elements(E) if (E.populate) {
         E.package.contacts(C) {
@@ -71,12 +95,13 @@ if (board) board(B) {
         }
     }
 
-    string base_path = (output_dir + "/" +
-        strsub(filename(B.name), 0, strlen(filename(B.name)) - 4) +
-        "_" + strlwr(layer_name_map[layer_choice]));
+        // Select the output directory
+        string base_path = (output_dir + "/" +
+                            strsub(filename(B.name), 0, strlen(filename(B.name)) - 4) +
+                            "_ASSEMBLY");
 
-    string cpl_filename = base_path + "_cpl.csv";
-    string bom_filename = base_path + "_bom.csv";
+        string cpl_filename = base_path + "_cpl.csv";
+        string bom_filename = base_path + "_bom.csv";
 
     output(cpl_filename) {
         printf("Designator,Mid X,Mid Y,Layer,Rotation\n");
