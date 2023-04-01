@@ -133,49 +133,73 @@ if (board) {
         }
     }
 
-    output(bom_filename) {
-        int i;
-        int indexes[];
-        numeric string values[];
+        // generate bom file
+        output(bom_filename)
+        {
+            // With big boards, JLC assembly service runs into issuses with to many designators in one line. The designators are therefore splitten up.
+            int JLC_MAX_DESIGNATOR_COUNT = 200;
 
-        for (i=0 ; i < element_count ; ++i) {
-            indexes[i] = i;
-            values[i] = selected_elements[i].value;
-        }
-        sort(element_count, indexes, values);
-        printf("Comment,Designator,Footprint,LCSC Part #\n");
-
-        string current_value = "";
-        string current_footprint = "";
-        string current_lcscpart = "";
-        string designators = "";
-
-        for (i = 0 ; i < element_count ; ++i) {
-            UL_ELEMENT E = selected_elements[indexes[i]];
-
-            if (current_value != "" && (E.value != current_value || E.footprint.name != current_footprint)) {
-                printf("%s,%s,%s,%s\n", current_value, designators, current_footprint, current_lcscpart);
-                designators = "";
+            int usedFlag[];
+            for (int i = 0; i < element_count; ++i)
+            {
+                usedFlag[i] = 0;
             }
 
-            if (designators != "") {
-                designators += " ";
-            }
-            designators += E.name;
-            current_value = replace_commas(E.value);
-            current_footprint = replace_commas(E.footprint.name);
-            current_lcscpart = "";
+            // Print file header
+            printf("Comment,Designator,Footprint,LCSC Part #\n");
 
-            E.attributes(A) {
-                if (A.name == "LCSC_PART" || A.name == "LCSC") {
-                    current_lcscpart = replace_commas(A.value);
+            for (int usedIndex = 0; usedIndex < element_count; ++usedIndex)
+            {
+                // check if already collected
+                if (usedFlag[usedIndex] == 1)
+                    continue;
+
+                UL_ELEMENT currentPackage = selected_elements[usedIndex];
+
+                // Store Designators matching this package
+                string designators = currentPackage.name;
+
+                int designator_count = 1;
+
+                string package_value = replace_commas(currentPackage.value);
+                string package_footprint = replace_commas(currentPackage.footprint.name);
+                string package_lcscpart = getLCSC(currentPackage);
+
+                // collect all elements that match this package
+                for (int index = usedIndex + 1; index < element_count; index++)
+                {
+                    // check if already collected
+                    if (usedFlag[index] == 1)
+                        continue;
+
+                    UL_ELEMENT currentPart = selected_elements[index];
+
+                    string part_value = replace_commas(currentPart.value);
+                    string part_footprint = replace_commas(currentPart.footprint.name);
+                    string part_lcscpart = getLCSC(currentPart);
+
+                    // Check if identical
+                    if (part_value == package_value && part_footprint == package_footprint && package_lcscpart == part_lcscpart)
+                    {
+                        designators += " " + currentPart.name;
+                        designator_count++;
+
+                        // mark element collected
+                        usedFlag[index] = 1;
+                    }
+
+                    // Check if max designator count for this line is exceeded
+                    if (designator_count >= JLC_MAX_DESIGNATOR_COUNT)
+                        break;
                 }
+
+                // append element to the file
+                printf("%s,%s,%s,%s\n", package_value, designators, package_footprint, package_lcscpart);
+
+                // mark element collected
+                usedFlag[i] = 1;
             }
         }
-        if (current_value != "") {
-          printf("%s,%s,%s,%s\n", current_value, designators, current_footprint, current_lcscpart);
-        }
-    }
 
   dlgMessageBox("BOM and CPL files have been exported to: " + output_dir, "OK");
 
