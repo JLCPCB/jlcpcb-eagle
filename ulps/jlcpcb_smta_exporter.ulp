@@ -16,6 +16,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 // * cmd-change-swap-layer.ulp
 // * centroid-screamingcircuits-smd.ulp
 
+// Modified 2023 by Felix Haschke
+
 #usage "<b>JLCPCB Assembly files generator (BOM/CPL) </b>\n"
 "<p>"
     "Generates BOM and CPL files for JLCPCB SMT assembly service "
