@@ -1,0 +1,234 @@
+/*
+
+Copyright 2019 OXullo Intersecans <x@brainrapers.org>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+*/
+
+// Note: the following eagle-bundled ULPs have been used as a guidance:
+// * mountsmd.ulp
+// * bom.ulp
+// * cmd-change-swap-layer.ulp
+// * centroid-screamingcircuits-smd.ulp
+
+
+
+// jlcpcb_smta_exporter_v8.ulp
+// Date: 2025-04-25
+// Tested in Fusion 360 Electronics
+// Status: I only did one change for the THT components
+// now a tickbox allows the user to include THT components in the JLCPCB-style BOM and PnP files
+
+
+
+// jlcpcb_smta_exporter_v7.ulp
+// Date: 2020-12-05
+// Tested in Eagle 7.7.0
+// The differences between Eagle 7 and 9:
+// Eagle 9: E.footprint.name
+// Eagle 7: E.package.name
+// Status: Still not tested in various Eagle versions.
+// Date: 2021-06-18
+// Merged two improvements from DavidOb
+// Date: 2021-06-21
+// attribute name can be LCSC_PART or just LCSC, merged from upstream
+// LCSC_ROT or LCSC_ROTATION for manually rotation has been added, merged from upstream
+
+// Note: trying to modify this to include THT components for Fusion 360.
+
+#usage "<b>JLCPCB BOM/CPL files generator</b>\n"
+       "<p>"
+       "Generates BOM and CPL files for JLCPCB SMT assembly service"
+       "https://jlcpcb.com/smt-assembly"
+       "<p>"
+       "Run the ULP from the board editor"
+       "<p>"
+       "<author>Author: OXullo Intersecans x@brainrapers.org</author>"
+
+
+int layer_id_map[] = { 1, 16 };
+UL_ELEMENT selected_elements[];
+string layer_name_map[] = { "Top", "Bottom" };
+
+string replace_commas(string s)
+{
+    while (strstr(s, ",") >= 0) {  // convert commas to spaces
+        string substitution_string = " ";
+        sprintf(s, "%s%s%s", strsub(s, 0, strstr(s, ",")), substitution_string, strsub(s, strstr(s, ",")+1));
+    }
+
+    return s;
+}
+
+int is_dnp(UL_ELEMENT E) {
+  string val;
+
+  E.attributes(A) {
+    if (strlwr(A.name) == "dnp") {
+      val = strlwr(A.value);
+      return (val == "1" || val == "yes" || val == "true");
+    }
+  }
+
+  return 0;
+}
+
+
+if (board) board(B) {
+
+    string txt;
+    int layer_choice = 0;
+int skipEmpty = 1;
+int includeTHT = 0;
+
+int result = dlgDialog("JLCPCB Exporter") {
+  dlgVBoxLayout {
+    dlgCheckBox("Skip parts with empty value", skipEmpty);
+    dlgCheckBox("Include THT components", includeTHT);
+    dlgPushButton("Export") dlgAccept();
+    dlgPushButton("Cancel") dlgReject();
+  }
+};
+
+    if (result < 0) {
+        exit(0);
+    }
+
+    string output_dir = dlgDirectory("Export files to", filedir(B.name));
+
+    if (output_dir == "") {
+        exit(0);
+    }
+
+    int element_count = 0;
+
+B.elements(E) if (E.populate && !is_dnp(E)) {
+    if (includeTHT == 0) {
+        // Include all components, SMD and THT
+        selected_elements[element_count++] = E;
+    } else {
+        // Include only components with at least one SMD or PAD contact
+        E.package.contacts(C) {
+            if (C.smd || C.pad) {
+                selected_elements[element_count++] = E;
+                break;
+            }
+        }
+    }
+}
+
+
+    string base_path = (output_dir + "/" +
+        strsub(filename(B.name), 0, strlen(filename(B.name)) - 4) +
+        "_" + strlwr(layer_name_map[layer_choice]));
+
+    string cpl_filename = base_path + "_cpl.csv";
+    string bom_filename = base_path + "_bom.csv";
+
+    output(cpl_filename) {
+        printf("Designator,Mid X,Mid Y,Layer,Rotation\n");
+
+        for (int i = 0 ; i < element_count ; ++i) {
+            UL_ELEMENT E = selected_elements[i];
+            if(skipEmpty && E.value=="") {
+                continue;
+            }
+            int angle = E.angle;
+
+            E.attributes(A) {  // manually rotate the part
+                if (A.name == "JLC_ROTATION" || A.name == "JLC_ROT") {
+                    angle = angle + strtol(A.value);
+
+                    while(angle>360){
+                        angle = angle - 360;
+                    }
+                }
+            }
+
+            if (layer_name_map[layer_choice] == "Bottom") {
+              angle = (360 - angle);
+              angle = angle + 180;
+              angle = angle % 360;
+            }
+            real ang = angle;
+            printf("%s,%5.2f,%5.2f,%s,%.1f\n",
+                E.name, u2mm(E.x), u2mm(E.y),
+                layer_name_map[layer_choice],
+                ang);
+        }
+    }
+
+    output(bom_filename) {
+        int i;
+        int indexes[];
+        numeric string values[];
+
+        for (i=0 ; i < element_count ; ++i) {
+            indexes[i] = i;
+            values[i] = selected_elements[i].value;
+        }
+        sort(element_count, indexes, values);
+        printf("Comment,Designator,Footprint,LCSC Part #\n");
+
+        string current_value = "";
+        string current_footprint = "";
+        string current_lcscpart = "";
+        string designators = "";
+        int notstarting=0;
+        string E_LCSC_value = "";
+
+        for (i = 0 ; i < element_count ; ++i) {
+            UL_ELEMENT E = selected_elements[indexes[i]];
+
+            if(skipEmpty && E.value=="") {
+                continue;
+            }
+
+            // get LCSC_PART value of a part
+            E.attributes(A) {
+                if (A.name == "LCSC_PART" || A.name == "LCSC") {
+                    //printf("%s", A.value);
+                    E_LCSC_value = replace_commas(A.value);
+                }
+                else {
+                    E_LCSC_value = "";
+                }
+            }
+
+            if (notstarting && (E.value != current_value || E.package.name != current_footprint || E_LCSC_value != current_lcscpart)) {
+                printf("%s,%s,%s,%s\n", current_value, designators, current_footprint, current_lcscpart);
+                designators = "";
+            }
+            notstarting=1;
+
+            if (designators != "") {
+                designators += " ";
+            }
+            designators += E.name;
+            current_value = replace_commas(E.value);
+            current_footprint = replace_commas(E.package.name);
+            current_lcscpart = "";
+
+            // get LCSC_PART value of a part
+            E.attributes(A) {
+                if (A.name == "LCSC_PART" || A.name == "LCSC") {
+                    current_lcscpart = replace_commas(A.value);
+                }
+            }
+        }
+        if (current_value != "") {
+          printf("%s,%s,%s,%s\n", current_value, designators, current_footprint, current_lcscpart);
+        }
+    }
+
+  dlgMessageBox("BOM and CPL files have been exported to: " + output_dir, "OK");
+
+} else {
+  dlgMessageBox("Run this ULP from a Board", "OK");
+  exit (0);
+}
